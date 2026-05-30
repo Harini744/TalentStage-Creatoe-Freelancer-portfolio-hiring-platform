@@ -8,6 +8,7 @@ services:
     rootDir: backend
     buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && node prisma/seed.js
     startCommand: node server.js
+    plan: free
     envVars:
       - key: NODE_ENV
         value: production
@@ -16,11 +17,11 @@ services:
       - key: DATABASE_URL
         value: file:./dev.db
       - key: JWT_SECRET
-        generateValue: true          # Render auto-generates a secure random value
+        generateValue: true
       - key: FRONTEND_URL
-        value: https://talentstage-frontend.onrender.com   # update after frontend is deployed
+        value: https://talentstage-frontend.onrender.com
       - key: ANTHROPIC_API_KEY
-        value: ""                    # paste your key here, or leave blank for sandbox mode
+        value: ""
 
   # ─────────────────────────────────────────
   # 2. FRONTEND — Vite + React (Static Site)
@@ -31,10 +32,11 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    plan: free
     envVars:
       - key: VITE_API_URL
         value: https://talentstage-backend.onrender.com/api
     routes:
       - type: rewrite
         source: /*
-        destination: /index.html    # SPA fallback — all routes serve index.html
+        destination: /index.html
