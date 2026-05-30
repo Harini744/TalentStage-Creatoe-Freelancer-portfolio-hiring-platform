@@ -6,11 +6,12 @@
  * On Render:     VITE_API_URL=https://talentstage-backend.onrender.com/api
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Strip any trailing slash so we never get double-slashes in URLs
+const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
 /**
  * Helper function to make API requests with JWT token.
- * `endpoint` should be a path relative to /api, e.g. '/auth/login'
+ * `endpoint` must start with '/', e.g. '/auth/login'
  */
 async function apiFetch(endpoint, options = {}) {
   const token = localStorage.getItem('token');
@@ -23,17 +24,12 @@ async function apiFetch(endpoint, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Support both relative paths ('/auth/login') and full paths ('/api/auth/login')
-  // When VITE_API_URL is set (Render), use it directly; otherwise use Vite proxy
-  let url;
-  if (endpoint.startsWith('http')) {
-    url = endpoint;
-  } else if (endpoint.startsWith('/api/')) {
-    // Strip the leading /api since API_BASE_URL already ends with /api
-    url = `${API_BASE_URL}${endpoint.replace(/^\/api/, '')}`;
-  } else {
-    url = `${API_BASE_URL}${endpoint}`;
-  }
+  // Normalise endpoint: strip leading /api prefix if present (App.jsx uses /api/... paths)
+  const cleanEndpoint = endpoint.startsWith('/api/')
+    ? endpoint.slice(4)   // '/api/auth/login' → '/auth/login'
+    : endpoint;           // '/auth/login'     → '/auth/login'
+
+  const url = `${API_BASE_URL}${cleanEndpoint}`;
 
   const response = await fetch(url, {
     ...options,
