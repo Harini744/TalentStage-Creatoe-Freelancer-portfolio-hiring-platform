@@ -19,7 +19,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_URL
-        value: https://talentstage-frontend.onrender.com
+        value: https://talentstage-creatoe-freelancer-portfolio-93ir.onrender.com
       - key: ANTHROPIC_API_KEY
         value: ""
 
@@ -35,7 +35,7 @@ services:
     plan: free
     envVars:
       - key: VITE_API_URL
-        value: https://talentstage-backend.onrender.com/api
+        value: https://talentstage-creatoe-freelancer-portfolio.onrender.com/api
     routes:
       - type: rewrite
         source: /*

@@ -14,7 +14,8 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
-  process.env.FRONTEND_URL  // set this on Render: https://talentstage-frontend.onrender.com
+  'https://talentstage-creatoe-freelancer-portfolio-93ir.onrender.com',
+  process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
