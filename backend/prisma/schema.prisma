@@ -1,0 +1,133 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                  String          @id @default(uuid())
+  name                String
+  email               String          @unique
+  passwordHash        String
+  role                String          // "freelancer", "client", "both"
+  avatar              String?
+  verified            Boolean         @default(false)
+  proMember           Boolean         @default(false)
+  bio                 String?
+  hourlyRate          Int             @default(0)
+  availability        String          @default("available")
+  location            String?
+  memberSince         String
+  savedNotes          String?         // JSON string mapping freelancer IDs to notes
+  skills              String          // JSON array of strings
+  verifiedSkills      String          // JSON array of strings
+  education           String          // JSON array of education objects
+  workExperience      String          // JSON array of workExperience objects
+  
+  portfolioItems      PortfolioItem[]
+  projects            Project[]       @relation("ClientProjects")
+  proposals           Proposal[]
+  freelancerContracts Contract[]      @relation("FreelancerContracts")
+  clientContracts     Contract[]      @relation("ClientContracts")
+  transactions        Transaction[]
+}
+
+model PortfolioItem {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  category  String
+  tools     String   // JSON array of strings
+  desc      String
+  github    String?
+  live      String?
+}
+
+model Project {
+  id              String     @id @default(uuid())
+  title           String
+  clientId        String
+  client          User       @relation("ClientProjects", fields: [clientId], references: [id], onDelete: Cascade)
+  budget          Int
+  type            String     // "fixed" | "hourly"
+  category        String
+  deadline        String
+  skills          String     // JSON array of strings
+  postedDate      String
+  experienceLevel String
+  description     String
+  deliverables    String     // JSON array of strings
+  proposals       Proposal[]
+  contracts       Contract[]
+}
+
+model Proposal {
+  id           String   @id @default(uuid())
+  freelancerId String
+  freelancer   User     @relation(fields: [freelancerId], references: [id], onDelete: Cascade)
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  bidAmount    Int
+  timeline     String
+  cover        String
+  status       String   // "Pending", "Shortlisted", "Hired", "Rejected"
+  postedDate   String
+}
+
+model Contract {
+  id                     String   @id @default(uuid())
+  projectName            String
+  projectId              String
+  project                Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  freelancerId           String
+  freelancer             User     @relation("FreelancerContracts", fields: [freelancerId], references: [id], onDelete: Cascade)
+  clientId               String
+  client                 User     @relation("ClientContracts", fields: [clientId], references: [id], onDelete: Cascade)
+  totalValue             Int
+  deadline               String
+  deliverables           String   // JSON array of objects: { name, status }
+  milestoneReleasedCount Int      @default(0)
+  status                 String   // "Active", "Completed"
+  messages               String   // JSON array of objects: { sender, text, time }
+}
+
+model Transaction {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       String
+  project    String
+  client     String
+  type       String   // "Income" | "Withdrawal"
+  gross      Int
+  net        Int
+  commission Int
+  status     String   // "completed"
+}
+
+model FeedPost {
+  id           String   @id @default(uuid())
+  authorName   String
+  authorAvatar String?
+  category     String
+  content      String
+  likes        Int      @default(0)
+  comments     Int      @default(0)
+  time         String
+  likedUsers   String   // JSON array of user IDs who liked this post
+}
+
+model Challenge {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  prize       String
+  deadline    String
+  submissions Int      @default(0)
+  winner      String?
+  active      Boolean  @default(true)
+}

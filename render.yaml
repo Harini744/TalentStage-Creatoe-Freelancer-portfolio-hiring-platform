@@ -1,0 +1,40 @@
+services:
+  # ─────────────────────────────────────────
+  # 1. BACKEND — Express + Prisma + SQLite
+  # ─────────────────────────────────────────
+  - type: web
+    name: talentstage-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && node prisma/seed.js
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        value: file:./dev.db
+      - key: JWT_SECRET
+        generateValue: true          # Render auto-generates a secure random value
+      - key: FRONTEND_URL
+        value: https://talentstage-frontend.onrender.com   # update after frontend is deployed
+      - key: ANTHROPIC_API_KEY
+        value: ""                    # paste your key here, or leave blank for sandbox mode
+
+  # ─────────────────────────────────────────
+  # 2. FRONTEND — Vite + React (Static Site)
+  # ─────────────────────────────────────────
+  - type: web
+    name: talentstage-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://talentstage-backend.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html    # SPA fallback — all routes serve index.html

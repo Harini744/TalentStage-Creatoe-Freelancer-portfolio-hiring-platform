@@ -12,6 +12,12 @@ import {
   PieChart, Pie, Cell, BarChart, Bar 
 } from 'recharts';
 
+// Import API utilities
+import { 
+  authAPI, projectsAPI, contractsAPI, communityAPI, aiAPI, 
+  saveToken, removeToken, isLoggedIn, apiFetch
+} from './api';
+
 // ==========================================
 // 1. CONSTANTS & DETAILED SEED DATA
 // ==========================================
@@ -352,42 +358,18 @@ const INITIAL_MENTORS = [
 const TalentStageContext = createContext();
 
 const initialReducerState = {
-  currentUser: {
-    id: "user-current",
-    name: "Keerthi Arumugam",
-    email: "keerthi@talentstage.ai",
-    role: "both", // freelancer | client | both
-    avatar: "https://i.pravatar.cc/150?img=12",
-    verified: true,
-    proMember: false,
-    bio: "Passionate full-stack developer and system architect with deep interest in reactive web engines, clean layout typography, and AI tools integration.",
-    skills: ["React", "Tailwind CSS", "Node.js", "Python", "UI/UX Design"],
-    verifiedSkills: ["React"],
-    hourlyRate: 65,
-    availability: "available",
-    location: "Austin, TX",
-    memberSince: "May 2026",
-    education: [{ institution: "Texas A&M", degree: "B.S. Software Engineering", year: "2025" }],
-    workExperience: [{ company: "Tech Startup", role: "Junior Architect", duration: "2025 - Present", description: "Integrated LLM pipelines and crafted state interfaces." }],
-    portfolio: [
-      { id: "p-c-1", title: "Personal Coffee Hub UI", category: "Design", tools: ["Figma", "Tailwind"], desc: "Custom order grids styled with muted gold tones." }
-    ],
-    reviews: []
-  },
-  freelancers: INITIAL_FREELANCERS,
-  projects: INITIAL_PROJECTS,
-  proposals: [
-    { id: "prop-seed-1", freelancerId: "fl-1", projectId: "proj-1", bidAmount: 1800, timeline: "2 weeks", cover: "Hi! I would love to build this admin dashboard for Linear. I have designed custom widget systems at Vercel and can start today.", status: "Pending", items: ["p-1-1", "p-1-2"], postedDate: "2026-05-24" },
-    { id: "prop-seed-2", freelancerId: "fl-7", projectId: "proj-1", bidAmount: 2200, timeline: "2 weeks", cover: "I specialize in high-performance React architectures and AI systems. Can integrate LLM widgets instantly.", status: "Shortlisted", items: [], postedDate: "2026-05-24" }
-  ],
+  currentUser: {},
+  freelancers: [],
+  projects: [],
+  proposals: [],
   contracts: [],
   reviews: [],
-  transactions: INITIAL_TRANSACTIONS,
-  feedPosts: INITIAL_FEED,
-  challenges: INITIAL_CHALLENGES,
+  transactions: [],
+  feedPosts: [],
+  challenges: [],
   savedFreelancers: [],
   notifications: [
-    { id: "n-1", message: "Welcome to TalentStage! Verify your student ID to claim a verified gold star badge.", unread: true, time: "Just now" }
+    { id: "n-1", message: "Welcome to TalentStage! Log in or register to get started.", unread: true, time: "Just now" }
   ],
   activeView: "onboarding",
   aiResults: {},
@@ -396,6 +378,33 @@ const initialReducerState = {
 
 function stateReducer(state, action) {
   switch (action.type) {
+    case 'INIT_AUTH':
+      return {
+        ...state,
+        currentUser: action.payload.user,
+        apiKey: action.payload.token
+      };
+    case 'INIT_DATA':
+      return {
+        ...state,
+        freelancers: action.payload.freelancers,
+        projects: action.payload.projects,
+        feedPosts: action.payload.feedPosts,
+        challenges: action.payload.challenges,
+        transactions: action.payload.transactions,
+        contracts: action.payload.contracts,
+        proposals: action.payload.proposals
+      };
+    case 'SET_PROJECTS':
+      return { ...state, projects: action.payload };
+    case 'SET_CONTRACTS':
+      return { ...state, contracts: action.payload };
+    case 'SET_TRANSACTIONS':
+      return { ...state, transactions: action.payload };
+    case 'SET_PROPOSALS':
+      return { ...state, proposals: action.payload };
+    case 'SET_FEED_POSTS':
+      return { ...state, feedPosts: action.payload };
     case 'SET_USER':
       return { ...state, currentUser: { ...state.currentUser, ...action.payload } };
     case 'SET_VIEW':
@@ -413,6 +422,15 @@ function stateReducer(state, action) {
       };
     case 'ADD_CONTRACT':
       return { ...state, contracts: [action.payload, ...state.contracts] };
+    case 'ADD_CONTRACT_MSG':
+      return {
+        ...state,
+        contracts: state.contracts.map(c =>
+          c.id === action.payload.contractId
+            ? { ...c, messages: [...(c.messages || []), action.payload.msg] }
+            : c
+        )
+      };
     case 'UPDATE_DELIVERABLE':
       return {
         ...state,
@@ -789,15 +807,54 @@ function OnboardingScreen({ dispatch, addToast }) {
   const [uploadedFileName, setUploadedFileName] = useState("");
 
   const [setupData, setSetupData] = useState({ bio: "", rate: 50, skills: [] });
+  
+  const [isLogin, setIsLogin] = useState(false);
+  const [loginData, setLoginData] = useState({ email: "", password: "" });
 
-  const handleCreate = (e) => {
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!loginData.email || !loginData.password) {
+      addToast("Please fill in login details");
+      return;
+    }
+    try {
+      const result = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: loginData.email, password: loginData.password })
+      });
+      localStorage.setItem('token', result.token);
+      dispatch({ type: 'INIT_AUTH', payload: { user: result.user, token: result.token } });
+      await fetchAllDatabaseContent(dispatch);
+      addToast("Logged in successfully! Loading dashboard...");
+      dispatch({ type: 'SET_VIEW', payload: 'home-dashboard' });
+    } catch (error) {
+      addToast(`Login failed: ${error.message}`);
+    }
+  };
+
+  const handleCreate = async (e) => {
     e.preventDefault();
     if (!formData.name || !formData.email || !formData.password) {
       addToast("Please fill in all account fields");
       return;
     }
-    setStep(2);
-    addToast("Account drafted. Let's verify your identity!");
+    try {
+      const result = await apiFetch('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password,
+          role: formData.role
+        })
+      });
+      localStorage.setItem('token', result.token);
+      dispatch({ type: 'INIT_AUTH', payload: { user: result.user, token: result.token } });
+      setStep(2);
+      addToast("Account registered! Let's verify your identity.");
+    } catch (error) {
+      addToast(`Registration failed: ${error.message}`);
+    }
   };
 
   const handleVerify = () => {
@@ -822,21 +879,26 @@ function OnboardingScreen({ dispatch, addToast }) {
     }));
   };
 
-  const handleFinish = () => {
-    dispatch({
-      type: 'SET_USER',
-      payload: {
-        name: formData.name,
-        email: formData.email,
-        role: formData.role,
-        bio: setupData.bio || "Crafting premium user layouts.",
-        hourlyRate: Number(setupData.rate),
-        skills: setupData.skills.length > 0 ? setupData.skills : ["React"],
-        verified: true
-      }
-    });
-    addToast("Onboarding complete! Loading dashboard...");
-    dispatch({ type: 'SET_VIEW', payload: 'home-dashboard' });
+  const handleFinish = async () => {
+    try {
+      const updatedUser = await apiFetch('/api/auth/profile/update', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: formData.name,
+          bio: setupData.bio || "Crafting premium user layouts.",
+          hourlyRate: Number(setupData.rate),
+          skills: setupData.skills.length > 0 ? setupData.skills : ["React"],
+          availability: 'available',
+          location: 'San Francisco, CA'
+        })
+      });
+      dispatch({ type: 'SET_USER', payload: updatedUser });
+      await fetchAllDatabaseContent(dispatch);
+      addToast("Onboarding complete! Loading dashboard...");
+      dispatch({ type: 'SET_VIEW', payload: 'home-dashboard' });
+    } catch (error) {
+      addToast(`Failed completing setup: ${error.message}`);
+    }
   };
 
   return (
@@ -881,88 +943,158 @@ function OnboardingScreen({ dispatch, addToast }) {
           </div>
 
           {step === 1 && (
-            <form onSubmit={handleCreate} className="space-y-5 animate-slide-up">
-              <div>
-                <h3 className="text-2xl font-serif text-gold-500 font-semibold mb-2">Build Your Identity</h3>
-                <p className="text-sm text-[#9B97B2]">Join the market as freelancer, client or manage both.</p>
-              </div>
-
-              {/* Role cards */}
-              <div className="grid grid-cols-3 gap-3">
-                {[
-                  { r: 'freelancer', title: "Freelancer", desc: "Monetize elite skills" },
-                  { r: 'client', title: "Client", desc: "Scope & hire creators" },
-                  { r: 'both', title: "Hybrid Mode", desc: "Collaborate freely" }
-                ].map(item => (
-                  <button 
-                    key={item.r}
-                    type="button"
-                    onClick={() => setFormData(p => ({ ...p, role: item.r }))}
-                    className={`p-3 text-left border rounded-xl transition-all ${formData.role === item.r ? 'border-gold-500 bg-[#1A1A28] glow-active' : 'border-[#2A2A42] bg-[#12121A] hover:border-[#F5C842]/30'}`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-[#22223A] flex items-center justify-center mb-2">
-                      {item.r === 'freelancer' && <Briefcase className="w-4 h-4 text-gold-500" />}
-                      {item.r === 'client' && <Users className="w-4 h-4 text-gold-500" />}
-                      {item.r === 'both' && <Sparkles className="w-4 h-4 text-gold-500" />}
-                    </div>
-                    <h4 className="text-xs font-semibold text-[#F0EDE8]">{item.title}</h4>
-                    <p className="text-[10px] text-[#9B97B2] leading-tight mt-1">{item.desc}</p>
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-4">
+            isLogin ? (
+              <form onSubmit={handleLogin} className="space-y-5 animate-slide-up">
                 <div>
-                  <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Full Name</label>
-                  <input 
-                    type="text" 
-                    required 
-                    value={formData.name}
-                    onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
-                    className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500" 
-                    placeholder="Keerthi Arumugam"
-                  />
+                  <h3 className="text-2xl font-serif text-gold-500 font-semibold mb-2">Welcome Back</h3>
+                  <p className="text-sm text-[#9B97B2]">Sign in to access your dashboard and active contracts.</p>
                 </div>
-                <div>
-                  <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Email Address</label>
-                  <input 
-                    type="email" 
-                    required
-                    value={formData.email}
-                    onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
-                    className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500" 
-                    placeholder="keerthi@talentstage.ai"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Password</label>
-                  <div className="relative">
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Email Address</label>
                     <input 
-                      type={showPass ? "text" : "password"} 
+                      type="email" 
                       required
-                      value={formData.password}
-                      onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
-                      className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500 pr-10" 
-                      placeholder="••••••••"
+                      value={loginData.email}
+                      onChange={e => setLoginData(p => ({ ...p, email: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500" 
+                      placeholder="keerthi@talentstage.ai"
                     />
-                    <button 
-                      type="button"
-                      onClick={() => setShowPass(!showPass)}
-                      className="absolute right-3 top-3 text-[#5C5878] hover:text-[#9B97B2]"
-                    >
-                      {showPass ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
-                    </button>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Password</label>
+                    <div className="relative">
+                      <input 
+                        type={showPass ? "text" : "password"} 
+                        required
+                        value={loginData.password}
+                        onChange={e => setLoginData(p => ({ ...p, password: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500 pr-10" 
+                        placeholder="••••••••"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowPass(!showPass)}
+                        className="absolute right-3 top-3 text-[#5C5878] hover:text-[#9B97B2]"
+                      >
+                        {showPass ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <button 
-                type="submit" 
-                className="w-full py-3 bg-gold-500 hover:bg-gold-600 text-black font-sans font-semibold rounded-lg hover:scale-[1.02] active:scale-95 transition-all text-sm"
-              >
-                Create Account
-              </button>
-            </form>
+                <button 
+                  type="submit" 
+                  className="w-full py-3 bg-gold-500 hover:bg-gold-600 text-black font-sans font-semibold rounded-lg hover:scale-[1.02] active:scale-95 transition-all text-sm"
+                >
+                  Log In
+                </button>
+
+                <div className="text-center mt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setIsLogin(false)}
+                    className="text-xs text-gold-500 hover:underline"
+                  >
+                    Don't have an account? Sign Up
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleCreate} className="space-y-5 animate-slide-up">
+                <div>
+                  <h3 className="text-2xl font-serif text-gold-500 font-semibold mb-2">Build Your Identity</h3>
+                  <p className="text-sm text-[#9B97B2]">Join the market as freelancer, client or manage both.</p>
+                </div>
+
+                {/* Role cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { r: 'freelancer', title: "Freelancer", desc: "Monetize elite skills" },
+                    { r: 'client', title: "Client", desc: "Scope & hire creators" },
+                    { r: 'both', title: "Hybrid Mode", desc: "Collaborate freely" }
+                  ].map(item => (
+                    <button 
+                      key={item.r}
+                      type="button"
+                      onClick={() => setFormData(p => ({ ...p, role: item.r }))}
+                      className={`p-3 text-left border rounded-xl transition-all ${formData.role === item.r ? 'border-gold-500 bg-[#1A1A28] glow-active' : 'border-[#2A2A42] bg-[#12121A] hover:border-[#F5C842]/30'}`}
+                    >
+                      <div className="w-8 h-8 rounded-full bg-[#22223A] flex items-center justify-center mb-2">
+                        {item.r === 'freelancer' && <Briefcase className="w-4 h-4 text-gold-500" />}
+                        {item.r === 'client' && <Users className="w-4 h-4 text-gold-500" />}
+                        {item.r === 'both' && <Sparkles className="w-4 h-4 text-gold-500" />}
+                      </div>
+                      <h4 className="text-xs font-semibold text-[#F0EDE8]">{item.title}</h4>
+                      <p className="text-[10px] text-[#9B97B2] leading-tight mt-1">{item.desc}</p>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Full Name</label>
+                    <input 
+                      type="text" 
+                      required 
+                      value={formData.name}
+                      onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500" 
+                      placeholder="Keerthi Arumugam"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Email Address</label>
+                    <input 
+                      type="email" 
+                      required
+                      value={formData.email}
+                      onChange={e => setFormData(p => ({ ...p, email: e.target.value }))}
+                      className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500" 
+                      placeholder="keerthi@talentstage.ai"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-mono text-[#9B97B2] uppercase mb-1.5">Password</label>
+                    <div className="relative">
+                      <input 
+                        type={showPass ? "text" : "password"} 
+                        required
+                        value={formData.password}
+                        onChange={e => setFormData(p => ({ ...p, password: e.target.value }))}
+                        className="w-full px-4 py-2.5 bg-[#12121A] border border-[#2A2A42] rounded-lg text-sm text-[#F0EDE8] focus:outline-none focus:border-gold-500 pr-10" 
+                        placeholder="••••••••"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowPass(!showPass)}
+                        className="absolute right-3 top-3 text-[#5C5878] hover:text-[#9B97B2]"
+                      >
+                        {showPass ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <button 
+                  type="submit" 
+                  className="w-full py-3 bg-gold-500 hover:bg-gold-600 text-black font-sans font-semibold rounded-lg hover:scale-[1.02] active:scale-95 transition-all text-sm"
+                >
+                  Create Account
+                </button>
+
+                <div className="text-center mt-4">
+                  <button 
+                    type="button"
+                    onClick={() => setIsLogin(true)}
+                    className="text-xs text-gold-500 hover:underline"
+                  >
+                    Already have an account? Log In
+                  </button>
+                </div>
+              </form>
+            )
           )}
 
           {step === 2 && (
@@ -1342,30 +1474,32 @@ function PostProjectView({ state, dispatch, addToast }) {
     }
   };
 
-  const handlePost = () => {
+  const handlePost = async () => {
     if (!fields.title || !fields.description) {
       addToast("Please fill out Title and Description.");
       return;
     }
-    const newProj = {
-      id: `proj-${Date.now()}`,
-      title: fields.title,
-      client: { name: state.currentUser.name, avatar: state.currentUser.avatar },
-      budget: Number(fields.maxBudget),
-      type: fields.type,
-      category: fields.category,
-      deadline: fields.deadline,
-      skills: fields.skills.length > 0 ? fields.skills : ["React"],
-      proposalsCount: 0,
-      postedDate: new Date().toISOString().split('T')[0],
-      experienceLevel: fields.experience,
-      description: fields.description,
-      deliverables: fields.deliverables.length > 0 ? fields.deliverables : ["Initial layout design"]
-    };
-
-    dispatch({ type: 'ADD_PROJECT', payload: newProj });
-    addToast(`Project "${fields.title}" posted to the marketplace!`);
-    dispatch({ type: 'SET_VIEW', payload: 'cl-my-projects' });
+    try {
+      const newProj = await apiFetch('/api/projects', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: fields.title,
+          budget: Number(fields.maxBudget),
+          type: fields.type,
+          category: fields.category,
+          deadline: fields.deadline,
+          skills: fields.skills.length > 0 ? fields.skills : ['React'],
+          experienceLevel: fields.experience,
+          description: fields.description,
+          deliverables: fields.deliverables.length > 0 ? fields.deliverables : ['Initial layout design']
+        })
+      });
+      dispatch({ type: 'ADD_PROJECT', payload: newProj });
+      addToast(`Project "${fields.title}" posted to the marketplace!`);
+      dispatch({ type: 'SET_VIEW', payload: 'cl-my-projects' });
+    } catch (error) {
+      addToast(`Failed to post project: ${error.message}`);
+    }
   };
 
   return (
@@ -1651,7 +1785,7 @@ function ManageAuditsView({ state, dispatch, addToast }) {
   const [showContractSetup, setShowContractSetup] = useState(false);
   const [selectedProposalForHiring, setSelectedProposalForHiring] = useState(null);
 
-  const myPostedProjects = state.projects.filter(p => p.client.name === state.currentUser.name);
+  const myPostedProjects = state.projects.filter(p => p.client?.id === state.currentUser.id || p.clientId === state.currentUser.id);
 
   // AI Freelancer Match (Feature #1)
   const runSmartMatch = async (proj) => {
@@ -1718,35 +1852,49 @@ function ManageAuditsView({ state, dispatch, addToast }) {
     setShowContractSetup(true);
   };
 
-  const finalizeHiring = () => {
+  const finalizeHiring = async () => {
     if (!selectedProposalForHiring) return;
     const proj = state.projects.find(p => p.id === selectedProposalForHiring.projectId);
     const fl = state.freelancers.find(f => f.id === selectedProposalForHiring.freelancerId);
     
-    // Create new contract
-    const newContract = {
-      id: `cont-${Date.now()}`,
-      projectName: proj.title,
-      projectId: proj.id,
-      freelancerName: fl.name,
-      freelancerId: fl.id,
-      clientName: state.currentUser.name,
-      totalValue: selectedProposalForHiring.bidAmount,
-      deadline: proj.deadline,
-      deliverables: proj.deliverables.map(d => ({ name: d, status: "Not Started" })),
-      milestoneReleasedCount: 0,
-      messages: [
-        { sender: "System", text: `Contract established with ${fl.name} for $${selectedProposalForHiring.bidAmount}. Milestone funds locked in escrow.`, time: "Just now" }
-      ]
-    };
+    try {
+      // Create contract in backend
+      const newContract = await apiFetch('/api/contracts', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: proj.id,
+          freelancerId: fl.id,
+          totalValue: selectedProposalForHiring.bidAmount
+        })
+      });
 
-    dispatch({ type: 'ADD_CONTRACT', payload: newContract });
-    dispatch({ type: 'UPDATE_PROPOSAL_STATUS', payload: { id: selectedProposalForHiring.id, status: "Hired" } });
-    
-    addToast(`Hired ${fl.name}! Escrow contract activated.`);
-    setShowContractSetup(false);
-    setSelectedProposalForHiring(null);
-    dispatch({ type: 'SET_VIEW', payload: 'cl-my-projects' }); // refresh view
+      // Update proposal status in backend
+      await apiFetch(`/api/projects/proposals/${selectedProposalForHiring.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'Hired' })
+      });
+
+      // Update local state immediately
+      const localContract = {
+        ...newContract,
+        projectName: proj.title,
+        freelancerName: fl.name,
+        clientName: state.currentUser.name,
+        deliverables: newContract.deliverables || proj.deliverables.map(d => ({ name: d, status: 'Not Started' })),
+        messages: [{ sender: 'System', text: `Contract established with ${fl.name} for $${selectedProposalForHiring.bidAmount}. Milestone funds locked in escrow.`, time: 'Just now' }]
+      };
+
+      dispatch({ type: 'ADD_CONTRACT', payload: localContract });
+      dispatch({ type: 'UPDATE_PROPOSAL_STATUS', payload: { id: selectedProposalForHiring.id, status: 'Hired' } });
+      
+      addToast(`Hired ${fl.name}! Escrow contract activated.`);
+    } catch (error) {
+      addToast(`Failed to create contract: ${error.message}`);
+    } finally {
+      setShowContractSetup(false);
+      setSelectedProposalForHiring(null);
+      dispatch({ type: 'SET_VIEW', payload: 'cl-my-projects' });
+    }
   };
 
   return (
@@ -2134,32 +2282,35 @@ function PortfolioGalleryView({ state, dispatch, addToast }) {
 
   const myPortfolio = state.currentUser.portfolio || [];
 
-  const handleAddProject = () => {
+  const handleAddProject = async () => {
     if (!title || !desc) {
       addToast("Title and Description are required.");
       return;
     }
-    const newItem = {
-      id: `port-${Date.now()}`,
-      title,
-      category,
-      tools: tools.split(',').map(x => x.trim()).filter(Boolean),
-      desc,
-      github: gitLink,
-      live: liveLink
-    };
-
-    dispatch({ type: 'ADD_PORTFOLIO_ITEM', payload: newItem });
-    addToast(`Portfolio item "${title}" added to gallery!`);
-    setShowAddModal(false);
-    
-    // reset
-    setTitle("");
-    setCategory("Web Dev");
-    setDesc("");
-    setTools("");
-    setGitLink("");
-    setLiveLink("");
+    try {
+      const updatedUser = await apiFetch('/api/auth/profile/portfolio', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          category,
+          tools: tools.split(',').map(x => x.trim()).filter(Boolean),
+          desc,
+          github: gitLink,
+          live: liveLink
+        })
+      });
+      dispatch({ type: 'SET_USER', payload: updatedUser });
+      addToast(`Portfolio item "${title}" added to gallery!`);
+      setShowAddModal(false);
+      setTitle("");
+      setCategory("Web Dev");
+      setDesc("");
+      setTools("");
+      setGitLink("");
+      setLiveLink("");
+    } catch (error) {
+      addToast(`Failed to add portfolio item: ${error.message}`);
+    }
   };
 
   return (
@@ -2370,31 +2521,28 @@ function BrowseProjectsView({ state, dispatch, addToast }) {
     setBidAmt(proj.budget);
   };
 
-  const submitProposal = () => {
+  const submitProposal = async () => {
     if (!bidAmt || bidCover.length < 20) {
       addToast("Please fill in Bid Amount and a cover letter (>20 characters)");
       return;
     }
-
-    const newProposal = {
-      id: `prop-${Date.now()}`,
-      freelancerId: state.currentUser.id,
-      projectId: selectedProjectForBid.id,
-      bidAmount: Number(bidAmt),
-      timeline: bidTimeline,
-      cover: bidCover,
-      status: "Pending",
-      postedDate: new Date().toISOString().split('T')[0]
-    };
-
-    dispatch({ type: 'SUBMIT_PROPOSAL', payload: newProposal });
-    addToast(`Proposal for "${selectedProjectForBid.title}" filed!`);
-    setShowBidPanel(false);
-    setSelectedProjectForBid(null);
-    setBidCover("");
-    
-    // Increase count on projects list as a dynamic trigger
-    dispatch({ type: 'UPDATE_PROJECT_BIDS', payload: selectedProjectForBid.id });
+    try {
+      const newProposal = await apiFetch(`/api/projects/${selectedProjectForBid.id}/proposals`, {
+        method: 'POST',
+        body: JSON.stringify({
+          bidAmount: Number(bidAmt),
+          timeline: bidTimeline,
+          cover: bidCover
+        })
+      });
+      dispatch({ type: 'SUBMIT_PROPOSAL', payload: newProposal });
+      addToast(`Proposal for "${selectedProjectForBid.title}" filed!`);
+      setShowBidPanel(false);
+      setSelectedProjectForBid(null);
+      setBidCover("");
+    } catch (error) {
+      addToast(`Failed to submit proposal: ${error.message}`);
+    }
   };
 
   return (
@@ -2597,33 +2745,49 @@ function ContractsView({ state, dispatch, addToast }) {
     setChatText("");
   };
 
-  const handleDeliverableStatusChange = (cId, idx, status) => {
+  const handleDeliverableStatusChange = async (cId, idx, status) => {
+    // Optimistic local update
     dispatch({ type: 'UPDATE_DELIVERABLE', payload: { contractId: cId, index: idx, status } });
     addToast(`Milestone Status updated to: ${status}`);
 
-    if (status === "Approved") {
-      dispatch({ type: 'RELEASE_PAYMENT', payload: { contractId: cId } });
-      const amt = Math.round(activeContract.totalValue / activeContract.deliverables.length);
-      const fee = Math.round(amt * 0.1);
-      const net = amt - fee;
-      
-      // Credit Freelancer Earnings
-      dispatch({
-        type: 'ADD_TRANSACTION',
-        payload: {
-          id: `t-${Date.now()}`,
-          date: new Date().toLocaleDateString(),
-          project: activeContract.projectName,
-          client: activeContract.clientName,
-          type: "Income",
-          gross: amt,
-          net: net,
-          commission: fee,
-          status: "completed"
-        }
+    try {
+      await apiFetch(`/api/contracts/${cId}/deliverables/${idx}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
       });
 
-      addToast(`Escrow release complete! $${net} credited to wallet.`);
+      if (status === 'Approved') {
+        // Release payment in backend
+        const releaseResult = await apiFetch(`/api/contracts/${cId}/release`, {
+          method: 'POST',
+          body: JSON.stringify({ deliverableIndex: idx })
+        });
+
+        dispatch({ type: 'RELEASE_PAYMENT', payload: { contractId: cId } });
+
+        const amt = Math.round(activeContract.totalValue / activeContract.deliverables.length);
+        const fee = Math.round(amt * 0.1);
+        const net = amt - fee;
+
+        dispatch({
+          type: 'ADD_TRANSACTION',
+          payload: {
+            id: `t-${Date.now()}`,
+            date: new Date().toLocaleDateString(),
+            project: activeContract.projectName,
+            client: activeContract.clientName,
+            type: 'Income',
+            gross: amt,
+            net: net,
+            commission: fee,
+            status: 'completed'
+          }
+        });
+
+        addToast(`Escrow release complete! $${net} credited to wallet.`);
+      }
+    } catch (error) {
+      console.error('Contract update error:', error.message);
     }
   };
 
@@ -3345,23 +3509,19 @@ function CommunityFeedView({ state, dispatch, addToast }) {
   const [newPostText, setNewPostText] = useState("");
   const [activeCat, setActiveCat] = useState("All");
 
-  const submitPost = () => {
+  const submitPost = async () => {
     if (!newPostText) return;
-    const newPost = {
-      id: `post-${Date.now()}`,
-      author: state.currentUser.name,
-      avatar: state.currentUser.avatar,
-      category: "Wins",
-      content: newPostText,
-      likes: 0,
-      comments: 0,
-      liked: false,
-      time: "Just now"
-    };
-
-    dispatch({ type: 'ADD_FEED_POST', payload: newPost });
-    addToast("Post shared with communities developers!");
-    setNewPostText("");
+    try {
+      const newPost = await apiFetch('/api/community/feed', {
+        method: 'POST',
+        body: JSON.stringify({ content: newPostText, category: 'Wins' })
+      });
+      dispatch({ type: 'ADD_FEED_POST', payload: newPost });
+      addToast("Post shared with communities developers!");
+      setNewPostText("");
+    } catch (error) {
+      addToast(`Failed to share post: ${error.message}`);
+    }
   };
 
   const filteredPosts = activeCat === 'All' 
@@ -3619,6 +3779,25 @@ function ApiKeyDrawer({ isOpen, onClose, apiKey, setApiKey, addToast }) {
 // 22. ROOT RENDER COMPONENT
 // ==========================================
 
+async function fetchAllDatabaseContent(dispatch) {
+  try {
+    const freelancers = await apiFetch('/api/auth/freelancers');
+    const projects = await apiFetch('/api/projects');
+    const feedPosts = await apiFetch('/api/community/feed');
+    const challenges = await apiFetch('/api/community/challenges');
+    const transactions = await apiFetch('/api/contracts/transactions');
+    const contracts = await apiFetch('/api/contracts');
+    const proposals = await apiFetch('/api/projects/my/proposals');
+    
+    dispatch({
+      type: 'INIT_DATA',
+      payload: { freelancers, projects, feedPosts, challenges, transactions, contracts, proposals }
+    });
+  } catch (error) {
+    console.error('Error fetching database contents:', error);
+  }
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(stateReducer, initialReducerState);
   
@@ -3629,6 +3808,27 @@ export default function App() {
   const [apiDrawerOpen, setApiDrawerOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [searchVal, setSearchVal] = useState("");
+
+  useEffect(() => {
+    const initApp = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const user = await apiFetch('/api/auth/profile');
+          dispatch({ type: 'INIT_AUTH', payload: { user, token } });
+          await fetchAllDatabaseContent(dispatch);
+          dispatch({ type: 'SET_VIEW', payload: 'home-dashboard' });
+        } catch (error) {
+          console.error('Initialization error:', error);
+          localStorage.removeItem('token');
+          dispatch({ type: 'SET_VIEW', payload: 'onboarding' });
+        }
+      } else {
+        dispatch({ type: 'SET_VIEW', payload: 'onboarding' });
+      }
+    };
+    initApp();
+  }, []);
 
   const addToast = (msg) => {
     const id = Date.now();
